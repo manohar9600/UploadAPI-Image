@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"time"
+	"uploadapi/validators"
 )
 
 type InputData struct {
@@ -17,7 +18,7 @@ type InputData struct {
 func GetMetadataJson(reqBody []byte, esPath string) (MetaData, error) {
 	var inputData InputData
 	json.Unmarshal(reqBody, &inputData)
-	err := ValidateInput(inputData)
+	err := validators.ValidateInput(inputData.User, inputData.Data)
 	var metadata MetaData
 	if err == nil {
 		metadata = fillImageMetadata(inputData, esPath)

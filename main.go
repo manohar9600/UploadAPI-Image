@@ -32,13 +32,15 @@ func responseHandlerImage(w http.ResponseWriter, r *http.Request) {
 }
 
 func responseHandlerVideo(w http.ResponseWriter, r *http.Request) {
-	log.Println("Response Recevied! - Video part")
+	log.Println("Response Recevied! - video part")
 	err := r.ParseMultipartForm(100 * 1024)
 	if err != nil {
 		log.Fatalln("Bad request", "error", err)
 	}
 
-	id := r.FormValue("_id")
+	id := r.FormValue("postId")
+	part := r.FormValue("part")
+	log.Println("video part postid:", id, "part:", part)
 	hash := r.FormValue("hash")
 	file, _, err := r.FormFile("file")
 	if err != nil {
@@ -49,7 +51,14 @@ func responseHandlerVideo(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatalln("Failed to convert to bytes", "error", err)
 	}
-	cache.SaveVideoData(id, hash, buf.Bytes())
+	res, err := cache.SaveVideoData(id, hash, part, buf.Bytes())
+	resultJson := ""
+	if err != nil {
+		resultJson = err.Error()
+	} else {
+		resultJson = res
+	}
+	fmt.Fprint(w, resultJson)
 }
 
 func responseHandlerMetadata(w http.ResponseWriter, r *http.Request) {

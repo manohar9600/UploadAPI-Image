@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
+	"strconv"
+	"uploadapi/validators"
 
 	"github.com/go-redis/redis"
 	elasticsearch "github.com/olivere/elastic/v7"
@@ -35,6 +38,8 @@ const mappingsVideo = `
     }
 }`
 
+// TODO: mappings for image elastic search
+
 var es = getElasticConnection()
 var redisClient = getRedisConnection()
 
@@ -52,33 +57,137 @@ func SaveImageData(data string) string {
 	return location
 }
 
-func SaveVideoData(id string, hash string, data []byte) error {
+func SaveVideoData(id string, hash string, partStr string, data []byte) (string, error) {
 	indexName := "videocache_temp1"
 	var videoPart VideoPart
 	videoPart.PostId = id
 	videoPart.Hash = hash
 	videoPart.Bytes = string(data)
+	part, _ := strconv.Atoi(partStr)
+	videoPart.Part = part
 	ctx := context.Background()
 	createIndex(ctx, indexName, mappingsVideo)
-	// TODO: Add verification function
+	err := verifyVideoPart(videoPart)
+	if err != nil {
+		return "", err
+	}
 	if !checkPartExists(videoPart, ctx, indexName) {
 		jsonString, _ := json.Marshal(videoPart)
 		_, err := es.Index().Index(indexName).BodyJson(string(jsonString)).Do(ctx)
 		if err != nil {
 			log.Fatalln("Error while saving to elastic, error", err)
-			return errors.New("esError")
+			return "", errors.New("esError")
 		}
 	}
-	return nil
+	uploadBool, err := isPostFullyUploaded(videoPart, indexName)
+	if err != nil {
+		return "", errors.New("uploadFailure")
+	}
+	if uploadBool {
+		return "completed", nil
+	}
+	return "success", nil
 }
 
 func checkPartExists(part VideoPart, ctx context.Context, indexName string) bool {
-	termQuery := elasticsearch.NewTermQuery("hash", part.Hash)
-	result, err := es.Count().Index(indexName).Query(termQuery).Pretty(true).Do(ctx)
+	termQuery := elasticsearch.NewMatchQuery("postId", part.PostId)
+	termQuery2 := elasticsearch.NewMatchQuery("hash", part.Hash)
+	query := elasticsearch.NewBoolQuery().Must(termQuery).Filter(termQuery2)
+	result, err := es.Count().Index(indexName).Query(query).Pretty(true).Do(ctx)
 	if err != nil || result == 0 {
 		return false
 	}
+	log.Println("part already exists, hash:", part.Hash)
 	return true
+}
+
+func verifyVideoPart(videoPart VideoPart) error {
+	err := validators.ValidateData(videoPart.Bytes, videoPart.Hash)
+	if err != nil {
+		log.Println("Hash verification failed", videoPart.Part)
+		return err
+	}
+	data, err := GetFromCache(videoPart.PostId)
+	if err != nil {
+		return err
+	}
+	var metadata MetadataVideo
+	json.Unmarshal([]byte(data), &metadata)
+
+	partBool := false
+	for _, value := range metadata.PartHashes {
+		if value == videoPart.Hash {
+			partBool = true
+			break
+		}
+	}
+	if !partBool {
+		err = errors.New("video broken, reupload")
+		return err
+	} else {
+		return nil
+	}
+}
+
+func isPostFullyUploaded(videoPart VideoPart, indexName string) (bool, error) {
+	data, err := GetFromCache(videoPart.PostId)
+	if err != nil {
+		return false, err
+	}
+	var metadata MetadataVideo
+	json.Unmarshal([]byte(data), &metadata)
+	ctx := context.Background()
+	partsCount := getDocumentsCount(videoPart.PostId, ctx, indexName)
+	if partsCount < metadata.Parts {
+		return false, nil
+	}
+
+	storedHashes := getDocumentHashes(videoPart.PostId, ctx, indexName)
+	completionBool := true
+	for _, partHash := range metadata.PartHashes {
+		partBool := false
+		for _, storedHash := range storedHashes {
+			if partHash == storedHash {
+				partBool = true
+				break
+			}
+		}
+		if !partBool {
+			completionBool = false
+			break
+		}
+	}
+
+	return completionBool, nil
+}
+
+func getDocumentsCount(postId string, ctx context.Context, indexName string) int {
+	termQuery := elasticsearch.NewTermQuery("postId", postId)
+	result, err := es.Count().Index(indexName).Query(termQuery).Pretty(true).Do(ctx)
+	if err != nil {
+		result = 0
+	}
+	resultInt := int(result)
+	return resultInt
+}
+
+func getDocumentHashes(postId string, ctx context.Context, indexName string) []string {
+	var hashes []string
+	termQuery := elasticsearch.NewTermQuery("postId", postId)
+	scroller := es.Scroll().Index(indexName).Query(termQuery).Size(1)
+	for {
+		res, err := scroller.Do(context.TODO())
+		if err == io.EOF {
+			// No remaining documents matching the search so break out of the 'forever' loop
+			break
+		}
+		for _, hit := range res.Hits.Hits {
+			var part VideoPart
+			json.Unmarshal(hit.Source, &part)
+			hashes = append(hashes, part.Hash)
+		}
+	}
+	return hashes
 }
 
 func getElasticConnection() *elasticsearch.Client {
@@ -136,8 +245,8 @@ func getRedisConnection() *redis.Client {
 	return redisClient
 }
 
-func GetFromCache(username string) (string, error) {
-	val, err := redisClient.Get(username).Result()
+func GetFromCache(postId string) (string, error) {
+	val, err := redisClient.Get(postId).Result()
 	if err != nil {
 		log.Println("Issue with redis service")
 	}
@@ -151,7 +260,7 @@ func GetFromCache(username string) (string, error) {
 func PutIntoCache(reqBody []byte) error {
 	var metadata MetadataVideo
 	json.Unmarshal(reqBody, &metadata)
-	err := redisClient.Set(metadata.ID, reqBody, 0).Err()
+	err := redisClient.Set(metadata.ID, string(reqBody), 0).Err()
 	if err != nil {
 		log.Println("Failed to put data into cache", err)
 	} else {
