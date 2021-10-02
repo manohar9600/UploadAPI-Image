@@ -32,3 +32,15 @@ type Comments struct {
 	PostedTime     string `json:"postedTime"`
 	LastEditedTime string `json:"lastEditedTime"`
 }
+
+type Response struct {
+	ID        string   `json:"id"`
+	Result    bool     `json:"result"`
+	Completed bool     `json:"completed"`
+	Errors    []Errors `json:"errors"`
+}
+type Errors struct {
+	Side    string `json:"side"`
+	Tag     string `json:"tag"`
+	Message string `json:"message"`
+}

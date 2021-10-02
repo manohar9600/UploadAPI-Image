@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"strconv"
+	"uploadapi/metadata"
 	"uploadapi/validators"
 
 	"github.com/go-redis/redis"
@@ -43,18 +44,30 @@ const mappingsVideo = `
 var es = getElasticConnection()
 var redisClient = getRedisConnection()
 
-func SaveImageData(data string) string {
+func SaveImageData(data string) (string, string) {
 	indexName := "imagecache"
 	ctx := context.Background()
+	var response metadata.Response
+	// TODO: Add verification
 	_, err := es.Index().Index(indexName).BodyJson(data).Do(ctx)
 	location := ""
 	if err != nil {
-		log.Fatalln("Error while data indexing")
+		var resError metadata.Errors
+		resError.Side = "server"
+		resError.Tag = "elastic"
+		resError.Message = err.Error()
+		response.Result = false
+		response.Completed = false
+		response.Errors = append(response.Errors, resError)
+		log.Println("Error while data indexing")
 	} else {
 		// location = res.Header["Location"][0]
+		response.Result = true
+		response.Completed = true
 		location = ""
 	}
-	return location
+	res, _ := json.Marshal(&response)
+	return location, string(res)
 }
 
 func SaveVideoData(id string, hash string, partStr string, data []byte) (string, error) {

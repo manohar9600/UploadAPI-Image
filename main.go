@@ -17,18 +17,14 @@ func responseHandlerImage(w http.ResponseWriter, r *http.Request) {
 	log.Println("Response Recevied! - Image")
 	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		fmt.Fprintf(w, "Data is not proper")
+		fmt.Fprint(w, "dataissue")
+		return
 	}
-	location := cache.SaveImageData(string(reqBody))
-	metadata, err := metadata.GetMetadataJson(reqBody, location)
-	resultJson := ""
-	if err != nil {
-		resultJson = err.Error()
-	} else {
-		resultJson = "success"
-		fmt.Println(metadata.EsPath, metadata.PostedTime)
-	}
-	fmt.Fprint(w, resultJson)
+	location, response := cache.SaveImageData(string(reqBody))
+	fmt.Fprint(w, response)
+
+	metadata, _ := metadata.GetMetadataJson(reqBody, location)
+	fmt.Println(metadata.EsPath, metadata.PostedTime)
 }
 
 func responseHandlerVideo(w http.ResponseWriter, r *http.Request) {
