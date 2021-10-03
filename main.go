@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -29,9 +30,21 @@ func responseHandlerImage(w http.ResponseWriter, r *http.Request) {
 
 func responseHandlerVideo(w http.ResponseWriter, r *http.Request) {
 	log.Println("Response Recevied! - video part")
-	err := r.ParseMultipartForm(100 * 1024)
+	res, err := processVideoRequest(r)
 	if err != nil {
-		log.Fatalln("Bad request", "error", err)
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	fmt.Fprint(w, res)
+}
+
+func processVideoRequest(r *http.Request) (string, error) {
+	err := r.ParseMultipartForm(100 * 1024)
+	res := ""
+	if err != nil {
+		res = "Bad request"
+		log.Println(res, "error", err)
+		err = errors.New(res + ", err:" + err.Error())
+		return res, err
 	}
 
 	id := r.FormValue("postId")
@@ -40,15 +53,21 @@ func responseHandlerVideo(w http.ResponseWriter, r *http.Request) {
 	hash := r.FormValue("hash")
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		log.Fatalln("Bad request", "error", err)
+		res = "Bad request"
+		log.Println(res, "error", err)
+		err = errors.New(res + ", err:" + err.Error())
+		return res, err
 	}
 	buf := bytes.NewBuffer(nil)
 	_, err = io.Copy(buf, file)
 	if err != nil {
-		log.Fatalln("Failed to convert to bytes", "error", err)
+		res = "Failed to convert to bytes"
+		log.Println(res, "error", err)
+		err = errors.New(res + ", err:" + err.Error())
+		return res, err
 	}
-	res := cache.SaveVideoData(id, hash, part, buf.Bytes())
-	fmt.Fprint(w, res)
+	res = cache.SaveVideoData(id, hash, part, buf.Bytes())
+	return res, err
 }
 
 func responseHandlerMetadata(w http.ResponseWriter, r *http.Request) {
