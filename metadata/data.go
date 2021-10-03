@@ -39,6 +39,7 @@ type Response struct {
 	Completed bool     `json:"completed"`
 	Errors    []Errors `json:"errors"`
 }
+
 type Errors struct {
 	Side    string `json:"side"`
 	Tag     string `json:"tag"`

@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/viper"
 )
 
+const videoIndex = "videocache_temp1"
 const mappingsVideo = `
 {
     "settings": {
@@ -59,7 +60,7 @@ func SaveImageData(data string) (string, string) {
 		response.Result = false
 		response.Completed = false
 		response.Errors = append(response.Errors, resError)
-		log.Println("Error while data indexing")
+		log.Println("Error while data indexing in elastic")
 	} else {
 		// location = res.Header["Location"][0]
 		response.Result = true
@@ -70,36 +71,65 @@ func SaveImageData(data string) (string, string) {
 	return location, string(res)
 }
 
-func SaveVideoData(id string, hash string, partStr string, data []byte) (string, error) {
-	indexName := "videocache_temp1"
+func SaveVideoData(id string, hash string, partStr string, data []byte) string {
+	var response metadata.Response
+	response.Result = false
+	response.Completed = false
+
 	var videoPart VideoPart
 	videoPart.PostId = id
 	videoPart.Hash = hash
 	videoPart.Bytes = string(data)
 	part, _ := strconv.Atoi(partStr)
 	videoPart.Part = part
-	ctx := context.Background()
-	createIndex(ctx, indexName, mappingsVideo)
+
+	// data verification
 	err := verifyVideoPart(videoPart)
 	if err != nil {
-		return "", err
+		var resError metadata.Errors
+		resError.Side = "client"
+		resError.Tag = "verification"
+		resError.Message = err.Error()
+		response.Errors = append(response.Errors, resError)
+		res, _ := json.Marshal(&response)
+		return string(res)
 	}
-	if !checkPartExists(videoPart, ctx, indexName) {
-		jsonString, _ := json.Marshal(videoPart)
-		_, err := es.Index().Index(indexName).BodyJson(string(jsonString)).Do(ctx)
-		if err != nil {
-			log.Fatalln("Error while saving to elastic, error", err)
-			return "", errors.New("esError")
-		}
-	}
-	uploadBool, err := isPostFullyUploaded(videoPart, indexName)
+
+	response = saveInElastic(videoPart, response)
+
+	uploadBool, err := isPostFullyUploaded(videoPart)
 	if err != nil {
-		return "", errors.New("uploadFailure")
+		var resError metadata.Errors
+		resError.Side = "server"
+		resError.Tag = "elastic"
+		resError.Message = err.Error()
+		response.Errors = append(response.Errors, resError)
 	}
 	if uploadBool {
-		return "completed", nil
+		response.Result = true
+		response.Completed = true
 	}
-	return "success", nil
+	res, _ := json.Marshal(&response)
+	return string(res)
+}
+
+func saveInElastic(videoPart VideoPart, response metadata.Response) metadata.Response {
+	ctx := context.Background()
+	createIndex(ctx, videoIndex, mappingsVideo)
+	if !checkPartExists(videoPart, ctx, videoIndex) {
+		jsonString, _ := json.Marshal(videoPart)
+		_, err := es.Index().Index(videoIndex).BodyJson(string(jsonString)).Do(ctx)
+		if err != nil {
+			var resError metadata.Errors
+			resError.Side = "server"
+			resError.Tag = "elastic"
+			resError.Message = err.Error()
+			response.Errors = append(response.Errors, resError)
+		} else {
+			response.Result = true
+		}
+	}
+	return response
 }
 
 func checkPartExists(part VideoPart, ctx context.Context, indexName string) bool {
@@ -142,7 +172,7 @@ func verifyVideoPart(videoPart VideoPart) error {
 	}
 }
 
-func isPostFullyUploaded(videoPart VideoPart, indexName string) (bool, error) {
+func isPostFullyUploaded(videoPart VideoPart) (bool, error) {
 	data, err := GetFromCache(videoPart.PostId)
 	if err != nil {
 		return false, err
@@ -150,12 +180,12 @@ func isPostFullyUploaded(videoPart VideoPart, indexName string) (bool, error) {
 	var metadata MetadataVideo
 	json.Unmarshal([]byte(data), &metadata)
 	ctx := context.Background()
-	partsCount := getDocumentsCount(videoPart.PostId, ctx, indexName)
+	partsCount := getDocumentsCount(videoPart.PostId, ctx, videoIndex)
 	if partsCount < metadata.Parts {
 		return false, nil
 	}
 
-	storedHashes := getDocumentHashes(videoPart.PostId, ctx, indexName)
+	storedHashes := getDocumentHashes(videoPart.PostId, ctx, videoIndex)
 	completionBool := true
 	for _, partHash := range metadata.PartHashes {
 		partBool := false
@@ -227,12 +257,12 @@ func getElasticConnection() *elasticsearch.Client {
 func createIndex(ctx context.Context, indexName string, mappings string) {
 	exists, err := es.IndexExists(indexName).Do(ctx)
 	if err != nil {
-		log.Fatalln("Error communicating to elastic search, error: ", err)
+		log.Println("Error communicating to elastic search, error: ", err)
 	}
 	if !exists {
 		_, err := es.CreateIndex(indexName).BodyString(mappings).Do(ctx)
 		if err != nil {
-			log.Fatalln("Error creating elastic index, error: ", err)
+			log.Println("Error creating elastic index, error: ", err)
 		}
 	}
 }
@@ -270,14 +300,24 @@ func GetFromCache(postId string) (string, error) {
 	return val, err
 }
 
-func PutIntoCache(reqBody []byte) error {
-	var metadata MetadataVideo
-	json.Unmarshal(reqBody, &metadata)
-	err := redisClient.Set(metadata.ID, string(reqBody), 0).Err()
+func PutIntoCache(reqBody []byte) string {
+	var response metadata.Response
+	var metaData MetadataVideo
+	json.Unmarshal(reqBody, &metaData)
+	err := redisClient.Set(metaData.ID, string(reqBody), 0).Err()
 	if err != nil {
-		log.Println("Failed to put data into cache", err)
+		var resError metadata.Errors
+		resError.Side = "server"
+		resError.Tag = "redis"
+		resError.Message = err.Error()
+		response.Completed = false
+		response.Result = false
+		response.Errors = append(response.Errors, resError)
+		log.Println("Error while data indexing in redis. err:", err.Error())
 	} else {
-		log.Println("stored video input info, id:", metadata.ID)
+		response.Result = true
+		log.Println("stored video input info, id:", metaData.ID)
 	}
-	return err
+	res, _ := json.Marshal(response)
+	return string(res)
 }

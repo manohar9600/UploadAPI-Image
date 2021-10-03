@@ -47,14 +47,8 @@ func responseHandlerVideo(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatalln("Failed to convert to bytes", "error", err)
 	}
-	res, err := cache.SaveVideoData(id, hash, part, buf.Bytes())
-	resultJson := ""
-	if err != nil {
-		resultJson = err.Error()
-	} else {
-		resultJson = res
-	}
-	fmt.Fprint(w, resultJson)
+	res := cache.SaveVideoData(id, hash, part, buf.Bytes())
+	fmt.Fprint(w, res)
 }
 
 func responseHandlerMetadata(w http.ResponseWriter, r *http.Request) {
@@ -63,14 +57,8 @@ func responseHandlerMetadata(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Fprintf(w, "Data is not proper")
 	}
-	err = cache.PutIntoCache(reqBody)
-	resultJson := ""
-	if err != nil {
-		resultJson = err.Error()
-	} else {
-		resultJson = "success"
-	}
-	fmt.Fprint(w, resultJson)
+	response := cache.PutIntoCache(reqBody)
+	fmt.Fprint(w, response)
 }
 
 func main() {
