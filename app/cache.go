@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-const videoIndex = "videocache_temp1"
 const mappingsVideo = `
 {
     "settings": {
@@ -40,16 +39,30 @@ const mappingsVideo = `
 }`
 
 // TODO: mappings for image elastic search
-
+var config = loadConfig()
 var es = getElasticConnection()
 var redisClient = getRedisConnection()
 
+func loadConfig() Config {
+	viper.SetConfigFile("config.yaml")
+	err := viper.ReadInConfig()
+	if err != nil {
+		log.Fatalln("Error reading config file, ", err)
+	}
+	var config Config
+	err2 := viper.Unmarshal(&config)
+	if err2 != nil {
+		log.Fatalln("Unable to decode into struct, ", err)
+	}
+	return config
+}
+
 func SaveImageData(imageRequest ImageRequest, data string) string {
-	indexName := "imagecache"
 	ctx := context.Background()
 	var response Response
 	// TODO: Add verification
-	_, err := es.Index().Index(indexName).BodyJson(data).Do(ctx)
+	_, err := es.Index().Index(
+		config.Elasticsearch.IndexImage).BodyJson(data).Do(ctx)
 	if err != nil {
 		var resError Errors
 		resError.Side = "server"
@@ -111,10 +124,11 @@ func SaveVideoData(id string, hash string, partStr string, data []byte) string {
 
 func saveInElastic(videoPart VideoPart, response Response) Response {
 	ctx := context.Background()
-	createIndex(ctx, videoIndex, mappingsVideo)
-	if !checkPartExists(videoPart, ctx, videoIndex) {
+	createIndex(ctx, config.Elasticsearch.IndexVideo, mappingsVideo)
+	if !checkPartExists(videoPart, ctx) {
 		jsonString, _ := json.Marshal(videoPart)
-		_, err := es.Index().Index(videoIndex).BodyJson(string(jsonString)).Do(ctx)
+		_, err := es.Index().Index(
+			config.Elasticsearch.IndexVideo).BodyJson(string(jsonString)).Do(ctx)
 		if err != nil {
 			var resError Errors
 			resError.Side = "server"
@@ -128,11 +142,12 @@ func saveInElastic(videoPart VideoPart, response Response) Response {
 	return response
 }
 
-func checkPartExists(part VideoPart, ctx context.Context, indexName string) bool {
+func checkPartExists(part VideoPart, ctx context.Context) bool {
 	termQuery := elasticsearch.NewMatchQuery("postId", part.PostId)
 	termQuery2 := elasticsearch.NewMatchQuery("hash", part.Hash)
 	query := elasticsearch.NewBoolQuery().Must(termQuery).Filter(termQuery2)
-	result, err := es.Count().Index(indexName).Query(query).Pretty(true).Do(ctx)
+	result, err := es.Count().Index(config.Elasticsearch.IndexVideo).Query(
+		query).Pretty(true).Do(ctx)
 	if err != nil || result == 0 {
 		return false
 	}
@@ -176,12 +191,12 @@ func isPostFullyUploaded(videoPart VideoPart) (bool, error) {
 	var metadata MetadataVideo
 	json.Unmarshal([]byte(data), &metadata)
 	ctx := context.Background()
-	partsCount := getDocumentsCount(videoPart.PostId, ctx, videoIndex)
+	partsCount := getDocumentsCount(videoPart.PostId, ctx)
 	if partsCount < metadata.Parts {
 		return false, nil
 	}
 
-	storedHashes := getDocumentHashes(videoPart.PostId, ctx, videoIndex)
+	storedHashes := getDocumentHashes(videoPart.PostId, ctx)
 	completionBool := true
 	for _, partHash := range metadata.PartHashes {
 		partBool := false
@@ -200,9 +215,10 @@ func isPostFullyUploaded(videoPart VideoPart) (bool, error) {
 	return completionBool, nil
 }
 
-func getDocumentsCount(postId string, ctx context.Context, indexName string) int {
+func getDocumentsCount(postId string, ctx context.Context) int {
 	termQuery := elasticsearch.NewTermQuery("postId", postId)
-	result, err := es.Count().Index(indexName).Query(termQuery).Pretty(true).Do(ctx)
+	result, err := es.Count().Index(config.Elasticsearch.IndexVideo).Query(
+		termQuery).Pretty(true).Do(ctx)
 	if err != nil {
 		result = 0
 	}
@@ -210,10 +226,11 @@ func getDocumentsCount(postId string, ctx context.Context, indexName string) int
 	return resultInt
 }
 
-func getDocumentHashes(postId string, ctx context.Context, indexName string) []string {
+func getDocumentHashes(postId string, ctx context.Context) []string {
 	var hashes []string
 	termQuery := elasticsearch.NewTermQuery("postId", postId)
-	scroller := es.Scroll().Index(indexName).Query(termQuery).Size(1)
+	scroller := es.Scroll().Index(
+		config.Elasticsearch.IndexVideo).Query(termQuery).Size(1)
 	for {
 		res, err := scroller.Do(context.TODO())
 		if err == io.EOF {
@@ -230,20 +247,9 @@ func getDocumentHashes(postId string, ctx context.Context, indexName string) []s
 }
 
 func getElasticConnection() *elasticsearch.Client {
-	viper.SetConfigFile("config.yaml")
-	err := viper.ReadInConfig()
-	if err != nil {
-		log.Fatalln("Error reading config file, ", err)
-	}
-	var configuration Configuration
-	err2 := viper.Unmarshal(&configuration)
-	if err2 != nil {
-		log.Fatalln("Unable to decode into struct, ", err)
-	}
-
 	es, err := elasticsearch.NewClient(
-		elasticsearch.SetBasicAuth(configuration.Elasticsearch.Username,
-			configuration.Elasticsearch.Password))
+		elasticsearch.SetBasicAuth(config.Elasticsearch.Username,
+			config.Elasticsearch.Password))
 	if err != nil {
 		log.Fatalf("Error creating the client: %s", err)
 	}
@@ -265,20 +271,9 @@ func createIndex(ctx context.Context, indexName string, mappings string) {
 
 // Redis functions
 func getRedisConnection() *redis.Client {
-	viper.SetConfigFile("config.yaml")
-	err := viper.ReadInConfig()
-	if err != nil {
-		log.Fatalln("Error reading config file, ", err)
-	}
-
-	var configuration Configuration
-	err2 := viper.Unmarshal(&configuration)
-	if err2 != nil {
-		log.Fatalln("Unable to decode into struct, ", err)
-	}
-
 	redisClient := redis.NewClient(&redis.Options{
-		Password: configuration.Redis.Password,
+		Addr:     config.Redis.Address,
+		Password: config.Redis.Password,
 	})
 	log.Println("Connected to redis service")
 	return redisClient
