@@ -1,4 +1,4 @@
-package cache
+package app
 
 type Configuration struct {
 	Elasticsearch struct {
@@ -21,6 +21,12 @@ type MetadataVideo struct {
 type VideoPart struct {
 	PostId string `json:"postId"`
 	Part   int    `json:"part"`
+	Hash   string `json:"hash"`
+	Bytes  string `json:"bytes"`
+}
+
+type ImageRequest struct {
+	PostId string `json:"postId"`
 	Hash   string `json:"hash"`
 	Bytes  string `json:"bytes"`
 }

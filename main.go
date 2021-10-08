@@ -2,30 +2,58 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"uploadapi/cache"
-	"uploadapi/metadata"
+	"uploadapi/app"
+	"uploadapi/kafka"
 
 	"github.com/gorilla/mux"
 )
 
 func responseHandlerImage(w http.ResponseWriter, r *http.Request) {
 	log.Println("Response Recevied! - Image")
-	reqBody, err := ioutil.ReadAll(r.Body)
+	res, err := processImageRequest(r)
 	if err != nil {
-		fmt.Fprint(w, "dataissue")
-		return
-	}
-	location, response := cache.SaveImageData(string(reqBody))
-	fmt.Fprint(w, response)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, err.Error())
 
-	metadata, _ := metadata.GetMetadataJson(reqBody, location)
-	fmt.Println(metadata.EsPath, metadata.PostedTime)
+	} else {
+		fmt.Fprint(w, res)
+	}
+}
+
+func processImageRequest(r *http.Request) (string, error) {
+	reqBody, err := ioutil.ReadAll(r.Body)
+	res := ""
+	if err != nil {
+		res = "Bad request"
+		log.Println(res, "error", err)
+		err = errors.New(res + ", err:" + err.Error())
+		return res, err
+	}
+
+	var imageRequest app.ImageRequest
+	err = json.Unmarshal(reqBody, &imageRequest)
+	if err != nil {
+		res = "Bad request"
+		log.Println(res, "error", err)
+		err = errors.New(res + ", err:" + err.Error())
+		return res, err
+	}
+
+	res = app.SaveImageData(imageRequest, string(reqBody))
+	metadata := app.GetMetadataJson(imageRequest)
+	msgString, _ := json.Marshal(metadata)
+	err2 := kafka.ProduceToKafka(string(msgString))
+	if err2 == nil {
+		fmt.Println("sent kafka req,", metadata.EsPath, metadata.PostedTime)
+	}
+	return res, err
 }
 
 func responseHandlerVideo(w http.ResponseWriter, r *http.Request) {
@@ -33,8 +61,11 @@ func responseHandlerVideo(w http.ResponseWriter, r *http.Request) {
 	res, err := processVideoRequest(r)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, err.Error())
+
+	} else {
+		fmt.Fprint(w, res)
 	}
-	fmt.Fprint(w, res)
 }
 
 func processVideoRequest(r *http.Request) (string, error) {
@@ -66,7 +97,7 @@ func processVideoRequest(r *http.Request) (string, error) {
 		err = errors.New(res + ", err:" + err.Error())
 		return res, err
 	}
-	res = cache.SaveVideoData(id, hash, part, buf.Bytes())
+	res = app.SaveVideoData(id, hash, part, buf.Bytes())
 	return res, err
 }
 
@@ -76,7 +107,7 @@ func responseHandlerMetadata(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Fprintf(w, "Data is not proper")
 	}
-	response := cache.PutIntoCache(reqBody)
+	response := app.PutIntoCache(reqBody)
 	fmt.Fprint(w, response)
 }
 

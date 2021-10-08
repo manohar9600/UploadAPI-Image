@@ -1,4 +1,4 @@
-package cache
+package app
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"strconv"
-	"uploadapi/metadata"
 	"uploadapi/validators"
 
 	"github.com/go-redis/redis"
@@ -45,15 +44,14 @@ const mappingsVideo = `
 var es = getElasticConnection()
 var redisClient = getRedisConnection()
 
-func SaveImageData(data string) (string, string) {
+func SaveImageData(imageRequest ImageRequest, data string) string {
 	indexName := "imagecache"
 	ctx := context.Background()
-	var response metadata.Response
+	var response Response
 	// TODO: Add verification
 	_, err := es.Index().Index(indexName).BodyJson(data).Do(ctx)
-	location := ""
 	if err != nil {
-		var resError metadata.Errors
+		var resError Errors
 		resError.Side = "server"
 		resError.Tag = "elastic"
 		resError.Message = err.Error()
@@ -62,17 +60,15 @@ func SaveImageData(data string) (string, string) {
 		response.Errors = append(response.Errors, resError)
 		log.Println("Error while data indexing in elastic")
 	} else {
-		// location = res.Header["Location"][0]
 		response.Result = true
 		response.Completed = true
-		location = ""
 	}
 	res, _ := json.Marshal(&response)
-	return location, string(res)
+	return string(res)
 }
 
 func SaveVideoData(id string, hash string, partStr string, data []byte) string {
-	var response metadata.Response
+	var response Response
 	response.Result = false
 	response.Completed = false
 
@@ -86,7 +82,7 @@ func SaveVideoData(id string, hash string, partStr string, data []byte) string {
 	// data verification
 	err := verifyVideoPart(videoPart)
 	if err != nil {
-		var resError metadata.Errors
+		var resError Errors
 		resError.Side = "client"
 		resError.Tag = "verification"
 		resError.Message = err.Error()
@@ -99,7 +95,7 @@ func SaveVideoData(id string, hash string, partStr string, data []byte) string {
 
 	uploadBool, err := isPostFullyUploaded(videoPart)
 	if err != nil {
-		var resError metadata.Errors
+		var resError Errors
 		resError.Side = "server"
 		resError.Tag = "elastic"
 		resError.Message = err.Error()
@@ -113,14 +109,14 @@ func SaveVideoData(id string, hash string, partStr string, data []byte) string {
 	return string(res)
 }
 
-func saveInElastic(videoPart VideoPart, response metadata.Response) metadata.Response {
+func saveInElastic(videoPart VideoPart, response Response) Response {
 	ctx := context.Background()
 	createIndex(ctx, videoIndex, mappingsVideo)
 	if !checkPartExists(videoPart, ctx, videoIndex) {
 		jsonString, _ := json.Marshal(videoPart)
 		_, err := es.Index().Index(videoIndex).BodyJson(string(jsonString)).Do(ctx)
 		if err != nil {
-			var resError metadata.Errors
+			var resError Errors
 			resError.Side = "server"
 			resError.Tag = "elastic"
 			resError.Message = err.Error()
@@ -237,12 +233,12 @@ func getElasticConnection() *elasticsearch.Client {
 	viper.SetConfigFile("config.yaml")
 	err := viper.ReadInConfig()
 	if err != nil {
-		log.Println("Error reading config file, ", err)
+		log.Fatalln("Error reading config file, ", err)
 	}
 	var configuration Configuration
 	err2 := viper.Unmarshal(&configuration)
 	if err2 != nil {
-		log.Println("Unable to decode into struct, ", err)
+		log.Fatalln("Unable to decode into struct, ", err)
 	}
 
 	es, err := elasticsearch.NewClient(
@@ -272,13 +268,13 @@ func getRedisConnection() *redis.Client {
 	viper.SetConfigFile("config.yaml")
 	err := viper.ReadInConfig()
 	if err != nil {
-		log.Println("Error reading config file, ", err)
+		log.Fatalln("Error reading config file, ", err)
 	}
 
 	var configuration Configuration
 	err2 := viper.Unmarshal(&configuration)
 	if err2 != nil {
-		log.Println("Unable to decode into struct, ", err)
+		log.Fatalln("Unable to decode into struct, ", err)
 	}
 
 	redisClient := redis.NewClient(&redis.Options{
@@ -301,12 +297,12 @@ func GetFromCache(postId string) (string, error) {
 }
 
 func PutIntoCache(reqBody []byte) string {
-	var response metadata.Response
+	var response Response
 	var metaData MetadataVideo
 	json.Unmarshal(reqBody, &metaData)
 	err := redisClient.Set(metaData.ID, string(reqBody), 0).Err()
 	if err != nil {
-		var resError metadata.Errors
+		var resError Errors
 		resError.Side = "server"
 		resError.Tag = "redis"
 		resError.Message = err.Error()

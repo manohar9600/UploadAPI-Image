@@ -1,4 +1,4 @@
-package metadata
+package app
 
 type MetaData struct {
 	ID             string     `json:"_id"`
