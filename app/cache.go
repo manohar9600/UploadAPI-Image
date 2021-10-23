@@ -1,15 +1,20 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log"
+	"net/http"
 	"strconv"
+	"strings"
 	"uploadapi/validators"
 
 	"github.com/go-redis/redis"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	elasticsearch "github.com/olivere/elastic/v7"
 	"github.com/spf13/viper"
 )
@@ -42,6 +47,7 @@ const mappingsVideo = `
 var config = loadConfig()
 var es = getElasticConnection()
 var redisClient = getRedisConnection()
+var minioClient = getMinioConnection()
 
 func loadConfig() Config {
 	viper.SetConfigFile("config.yaml")
@@ -55,29 +61,6 @@ func loadConfig() Config {
 		log.Fatalln("Unable to decode into struct, ", err)
 	}
 	return config
-}
-
-func SaveImageData(imageRequest ImageRequest, data string) string {
-	ctx := context.Background()
-	var response Response
-	// TODO: Add verification
-	_, err := es.Index().Index(
-		config.Elasticsearch.IndexImage).BodyJson(data).Do(ctx)
-	if err != nil {
-		var resError Errors
-		resError.Side = "server"
-		resError.Tag = "elastic"
-		resError.Message = err.Error()
-		response.Result = false
-		response.Completed = false
-		response.Errors = append(response.Errors, resError)
-		log.Println("Error while data indexing in elastic")
-	} else {
-		response.Result = true
-		response.Completed = true
-	}
-	res, _ := json.Marshal(&response)
-	return string(res)
 }
 
 func SaveVideoData(id string, hash string, partStr string, data []byte) string {
@@ -310,5 +293,50 @@ func PutIntoCache(reqBody []byte) string {
 		log.Println("stored video input info, id:", metaData.ID)
 	}
 	res, _ := json.Marshal(response)
+	return string(res)
+}
+
+// minio functions
+func getMinioConnection() *minio.Client {
+	endpoint := config.Minio.Address
+	accessKeyID := config.Minio.AccessKeyID
+	secretAccessKey := config.Minio.SecretKey
+	// useSSL := true
+
+	// Initialize minio client object.
+	minioClient, err := minio.New(endpoint, &minio.Options{
+		Creds: credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
+		// Secure: useSSL,
+	})
+	if err != nil {
+		log.Fatalln(err)
+	}
+	return minioClient
+}
+
+func UploadFile(buf *bytes.Buffer, imgReq ImageRequest) string {
+	ctx := context.Background()
+	bucketName := "imagecache"
+	contentType := http.DetectContentType(buf.Bytes())
+	objectName := imgReq.PostId + "." + strings.Split(contentType, "/")[1]
+
+	info, err := minioClient.PutObject(ctx, bucketName, objectName,
+		buf, int64(buf.Len()), minio.PutObjectOptions{ContentType: contentType})
+	var response Response
+	if err != nil {
+		var resError Errors
+		resError.Side = "server"
+		resError.Tag = "minio"
+		resError.Message = err.Error()
+		response.Result = false
+		response.Completed = false
+		response.Errors = append(response.Errors, resError)
+		log.Println("Error while stroring data in minio")
+	} else {
+		log.Printf("Successfully uploaded %s of size %d\n", objectName, info.Size)
+		response.Result = true
+		response.Completed = true
+	}
+	res, _ := json.Marshal(&response)
 	return string(res)
 }

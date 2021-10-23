@@ -15,6 +15,10 @@ import (
 	"github.com/gorilla/mux"
 )
 
+type KafkaRequest struct {
+	ID string `json:"id"`
+}
+
 func responseHandlerImage(w http.ResponseWriter, r *http.Request) {
 	log.Println("Response Recevied! - Image")
 	res, err := processImageRequest(r)
@@ -28,7 +32,7 @@ func responseHandlerImage(w http.ResponseWriter, r *http.Request) {
 }
 
 func processImageRequest(r *http.Request) (string, error) {
-	reqBody, err := ioutil.ReadAll(r.Body)
+	err := r.ParseMultipartForm(100 * 1024)
 	res := ""
 	if err != nil {
 		res = "Bad request"
@@ -37,8 +41,25 @@ func processImageRequest(r *http.Request) (string, error) {
 		return res, err
 	}
 
+	file, _, err := r.FormFile("file")
+	properties := r.FormValue("properties")
+	if err != nil {
+		res = "Bad request"
+		log.Println(res, "error", err)
+		err = errors.New(res + ", err:" + err.Error())
+		return res, err
+	}
+	buf := bytes.NewBuffer(nil)
+	_, err = io.Copy(buf, file)
+	if err != nil {
+		res = "Failed to convert to bytes"
+		log.Println(res, "error", err)
+		err = errors.New(res + ", err:" + err.Error())
+		return res, err
+	}
+
 	var imageRequest app.ImageRequest
-	err = json.Unmarshal(reqBody, &imageRequest)
+	err = json.Unmarshal([]byte(properties), &imageRequest)
 	if err != nil {
 		res = "Bad request"
 		log.Println(res, "error", err)
@@ -46,12 +67,13 @@ func processImageRequest(r *http.Request) (string, error) {
 		return res, err
 	}
 
-	res = app.SaveImageData(imageRequest, string(reqBody))
-	metadata := app.GetMetadataJson(imageRequest)
-	msgString, _ := json.Marshal(metadata)
+	res = app.UploadFile(buf, imageRequest)
+	var kafkaReq KafkaRequest
+	kafkaReq.ID = imageRequest.PostId
+	msgString, err := json.Marshal(kafkaReq)
 	err2 := kafka.ProduceToKafka(string(msgString))
 	if err2 == nil {
-		fmt.Println("sent kafka req,", metadata.EsPath, metadata.PostedTime)
+		fmt.Println("sent kafka req, id:", kafkaReq.ID)
 	}
 	return res, err
 }

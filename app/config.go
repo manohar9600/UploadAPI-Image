@@ -12,6 +12,11 @@ type Config struct {
 		Address  string `yaml:"address"`
 		Password string `yaml:"password"`
 	} `yaml:"redis"`
+	Minio struct {
+		Address     string `yaml:"address"`
+		AccessKeyID string `yaml:"accessKeyId"`
+		SecretKey   string `yaml:"secretKey"`
+	} `yaml:"minio"`
 }
 
 type MetadataVideo struct {
@@ -28,7 +33,10 @@ type VideoPart struct {
 }
 
 type ImageRequest struct {
-	PostId string `json:"postId"`
-	Hash   string `json:"hash"`
-	Bytes  string `json:"bytes"`
+	PostId     string `json:"postId"`
+	User       string `json:"user"`
+	Hash       string `json:"hash"`
+	Caption    string `json:"caption"`
+	PostedTime string `json:"postedTime"`
+	Bytes      string `json:"bytes"`
 }
