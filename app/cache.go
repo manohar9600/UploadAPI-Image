@@ -314,9 +314,9 @@ func getMinioConnection() *minio.Client {
 	return minioClient
 }
 
-func UploadFile(buf *bytes.Buffer, imgReq ImageRequest) string {
+func UploadFile(buf *bytes.Buffer, imgReq ImageRequest) (string, ImageRequest, error) {
 	ctx := context.Background()
-	bucketName := "imagecache"
+	bucketName := config.Minio.ImageBucket
 	contentType := http.DetectContentType(buf.Bytes())
 	objectName := imgReq.PostId + "." + strings.Split(contentType, "/")[1]
 
@@ -336,7 +336,8 @@ func UploadFile(buf *bytes.Buffer, imgReq ImageRequest) string {
 		log.Printf("Successfully uploaded %s of size %d\n", objectName, info.Size)
 		response.Result = true
 		response.Completed = true
+		imgReq.FileNames = append(imgReq.FileNames, objectName)
 	}
 	res, _ := json.Marshal(&response)
-	return string(res)
+	return string(res), imgReq, err
 }

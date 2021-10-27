@@ -67,13 +67,15 @@ func processImageRequest(r *http.Request) (string, error) {
 		return res, err
 	}
 
-	res = app.UploadFile(buf, imageRequest)
-	var kafkaReq KafkaRequest
-	kafkaReq.ID = imageRequest.PostId
-	msgString, err := json.Marshal(kafkaReq)
+	res, imageRequest, err = app.UploadFile(buf, imageRequest)
+	if err != nil {
+		return res, nil
+	}
+
+	msgString, err := json.Marshal(imageRequest)
 	err2 := kafka.ProduceToKafka(string(msgString))
 	if err2 == nil {
-		fmt.Println("sent kafka req, id:", kafkaReq.ID)
+		fmt.Println("sent kafka req, id:", imageRequest.PostId)
 	}
 	return res, err
 }

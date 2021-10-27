@@ -16,6 +16,7 @@ type Config struct {
 		Address     string `yaml:"address"`
 		AccessKeyID string `yaml:"accessKeyId"`
 		SecretKey   string `yaml:"secretKey"`
+		ImageBucket string `yaml:"imageBucket"`
 	} `yaml:"minio"`
 }
 
@@ -33,10 +34,10 @@ type VideoPart struct {
 }
 
 type ImageRequest struct {
-	PostId     string `json:"postId"`
-	User       string `json:"user"`
-	Hash       string `json:"hash"`
-	Caption    string `json:"caption"`
-	PostedTime string `json:"postedTime"`
-	Bytes      string `json:"bytes"`
+	PostId     string   `json:"postId"`
+	User       string   `json:"user"`
+	Hash       string   `json:"hash"`
+	Caption    string   `json:"caption"`
+	PostedTime string   `json:"postedTime"`
+	FileNames  []string `json:"fileNames"`
 }
