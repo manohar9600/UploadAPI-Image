@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func GetMetadataJson(inputData ImageRequest) MetaData {
+func GetMetadataJson(inputData Request) MetaData {
 	var metadata MetaData
 	metadata.ID = inputData.PostId
 	metadata.Type = "image"

@@ -17,8 +17,8 @@ func ValidateInput(user string, data string) error {
 	return nil
 }
 
-func ValidateData(data string, hash string) error {
-	hashBytes := sha256.Sum256([]byte(data))
+func ValidateData(data []byte, hash string) error {
+	hashBytes := sha256.Sum256(data)
 	computedHash := hex.EncodeToString(hashBytes[:])
 	if computedHash == hash {
 		return nil

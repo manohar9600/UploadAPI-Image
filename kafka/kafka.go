@@ -3,6 +3,8 @@ package kafka
 import (
 	"context"
 	"log"
+	"net"
+	"strconv"
 
 	"github.com/segmentio/kafka-go"
 	"github.com/spf13/viper"
@@ -29,8 +31,38 @@ func getKafkaConfig() Configuration {
 	if err != nil {
 		log.Fatalln("Unable to decode into struct, ", err)
 	}
-
+	createKafkaTopics(configuration.Kafka.ProducerTopic)
 	return configuration
+}
+
+func createKafkaTopics(topic string) {
+	conn, err := kafka.Dial("tcp", "localhost:9092")
+	if err != nil {
+		panic(err.Error())
+	}
+	defer conn.Close()
+
+	controller, err := conn.Controller()
+	if err != nil {
+		panic(err.Error())
+	}
+	var controllerConn *kafka.Conn
+	controllerConn, err = kafka.Dial("tcp", net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port)))
+	if err != nil {
+		panic(err.Error())
+	}
+	defer controllerConn.Close()
+	topicConfigs := []kafka.TopicConfig{
+		kafka.TopicConfig{
+			Topic:             topic,
+			NumPartitions:     1,
+			ReplicationFactor: 1,
+		},
+	}
+	err = controllerConn.CreateTopics(topicConfigs...)
+	if err != nil {
+		panic(err.Error())
+	}
 }
 
 func ProduceToKafka(data string) error {

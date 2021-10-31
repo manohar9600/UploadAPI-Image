@@ -31,6 +31,8 @@ func responseHandlerImage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// function that process image request, returns error when there is
+// error in input data.
 func processImageRequest(r *http.Request) (string, error) {
 	err := r.ParseMultipartForm(100 * 1024)
 	res := ""
@@ -58,7 +60,7 @@ func processImageRequest(r *http.Request) (string, error) {
 		return res, err
 	}
 
-	var imageRequest app.ImageRequest
+	var imageRequest app.Request
 	err = json.Unmarshal([]byte(properties), &imageRequest)
 	if err != nil {
 		res = "Bad request"
@@ -121,7 +123,7 @@ func processVideoRequest(r *http.Request) (string, error) {
 		err = errors.New(res + ", err:" + err.Error())
 		return res, err
 	}
-	res = app.SaveVideoData(id, hash, part, buf.Bytes())
+	res = app.SaveVideoData(id, hash, part, buf)
 	return res, err
 }
 

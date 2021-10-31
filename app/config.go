@@ -17,27 +17,25 @@ type Config struct {
 		AccessKeyID string `yaml:"accessKeyId"`
 		SecretKey   string `yaml:"secretKey"`
 		ImageBucket string `yaml:"imageBucket"`
+		VideoBucket string `yaml:"videoBucket"`
 	} `yaml:"minio"`
-}
-
-type MetadataVideo struct {
-	ID         string   `json:"_id"`
-	Parts      int      `json:"parts"`
-	PartHashes []string `json:"partHashes"`
 }
 
 type VideoPart struct {
 	PostId string `json:"postId"`
-	Part   int    `json:"part"`
+	Part   string `json:"part"`
 	Hash   string `json:"hash"`
-	Bytes  string `json:"bytes"`
 }
 
-type ImageRequest struct {
-	PostId     string   `json:"postId"`
-	User       string   `json:"user"`
-	Hash       string   `json:"hash"`
-	Caption    string   `json:"caption"`
-	PostedTime string   `json:"postedTime"`
-	FileNames  []string `json:"fileNames"`
+type Request struct {
+	PostId         string   `json:"postId"`
+	Type           string   `json:"type"`
+	User           string   `json:"user"`
+	Hash           string   `json:"hash"`
+	Caption        string   `json:"caption"`
+	PostedTime     string   `json:"postedTime"`
+	FileNames      []string `json:"fileNames"`
+	Parts          int      `json:"parts"`
+	PartHashes     []string `json:"partHashes"`
+	UploadedHashes []string `json:"uploadedHashes"`
 }

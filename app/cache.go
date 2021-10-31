@@ -5,47 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
+	"uploadapi/kafka"
 	"uploadapi/validators"
 
 	"github.com/go-redis/redis"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	elasticsearch "github.com/olivere/elastic/v7"
 	"github.com/spf13/viper"
 )
 
-const mappingsVideo = `
-{
-    "settings": {
-        "number_of_shards": 1,
-        "number_of_replicas": 0
-    },
-    "mappings": {
-		"properties": {
-			"postid": {
-				"type": "keyword"
-			},
-			"part": {
-				"type": "integer"
-			},
-			"hash": {
-				"type": "keyword"
-			},
-			"bytes": {
-				"enabled": false
-			}
-        }
-    }
-}`
-
 // TODO: mappings for image elastic search
 var config = loadConfig()
-var es = getElasticConnection()
 var redisClient = getRedisConnection()
 var minioClient = getMinioConnection()
 
@@ -63,195 +37,6 @@ func loadConfig() Config {
 	return config
 }
 
-func SaveVideoData(id string, hash string, partStr string, data []byte) string {
-	var response Response
-	response.Result = false
-	response.Completed = false
-
-	var videoPart VideoPart
-	videoPart.PostId = id
-	videoPart.Hash = hash
-	videoPart.Bytes = string(data)
-	part, _ := strconv.Atoi(partStr)
-	videoPart.Part = part
-
-	// data verification
-	err := verifyVideoPart(videoPart)
-	if err != nil {
-		var resError Errors
-		resError.Side = "client"
-		resError.Tag = "verification"
-		resError.Message = err.Error()
-		response.Errors = append(response.Errors, resError)
-		res, _ := json.Marshal(&response)
-		return string(res)
-	}
-
-	response = saveInElastic(videoPart, response)
-
-	uploadBool, err := isPostFullyUploaded(videoPart)
-	if err != nil {
-		var resError Errors
-		resError.Side = "server"
-		resError.Tag = "elastic"
-		resError.Message = err.Error()
-		response.Errors = append(response.Errors, resError)
-	}
-	if uploadBool {
-		response.Result = true
-		response.Completed = true
-	}
-	res, _ := json.Marshal(&response)
-	return string(res)
-}
-
-func saveInElastic(videoPart VideoPart, response Response) Response {
-	ctx := context.Background()
-	createIndex(ctx, config.Elasticsearch.IndexVideo, mappingsVideo)
-	if !checkPartExists(videoPart, ctx) {
-		jsonString, _ := json.Marshal(videoPart)
-		_, err := es.Index().Index(
-			config.Elasticsearch.IndexVideo).BodyJson(string(jsonString)).Do(ctx)
-		if err != nil {
-			var resError Errors
-			resError.Side = "server"
-			resError.Tag = "elastic"
-			resError.Message = err.Error()
-			response.Errors = append(response.Errors, resError)
-		} else {
-			response.Result = true
-		}
-	}
-	return response
-}
-
-func checkPartExists(part VideoPart, ctx context.Context) bool {
-	termQuery := elasticsearch.NewMatchQuery("postId", part.PostId)
-	termQuery2 := elasticsearch.NewMatchQuery("hash", part.Hash)
-	query := elasticsearch.NewBoolQuery().Must(termQuery).Filter(termQuery2)
-	result, err := es.Count().Index(config.Elasticsearch.IndexVideo).Query(
-		query).Pretty(true).Do(ctx)
-	if err != nil || result == 0 {
-		return false
-	}
-	log.Println("part already exists, hash:", part.Hash)
-	return true
-}
-
-func verifyVideoPart(videoPart VideoPart) error {
-	err := validators.ValidateData(videoPart.Bytes, videoPart.Hash)
-	if err != nil {
-		log.Println("Hash verification failed", videoPart.Part)
-		return err
-	}
-	data, err := GetFromCache(videoPart.PostId)
-	if err != nil {
-		return err
-	}
-	var metadata MetadataVideo
-	json.Unmarshal([]byte(data), &metadata)
-
-	partBool := false
-	for _, value := range metadata.PartHashes {
-		if value == videoPart.Hash {
-			partBool = true
-			break
-		}
-	}
-	if !partBool {
-		err = errors.New("video broken, reupload")
-		return err
-	} else {
-		return nil
-	}
-}
-
-func isPostFullyUploaded(videoPart VideoPart) (bool, error) {
-	data, err := GetFromCache(videoPart.PostId)
-	if err != nil {
-		return false, err
-	}
-	var metadata MetadataVideo
-	json.Unmarshal([]byte(data), &metadata)
-	ctx := context.Background()
-	partsCount := getDocumentsCount(videoPart.PostId, ctx)
-	if partsCount < metadata.Parts {
-		return false, nil
-	}
-
-	storedHashes := getDocumentHashes(videoPart.PostId, ctx)
-	completionBool := true
-	for _, partHash := range metadata.PartHashes {
-		partBool := false
-		for _, storedHash := range storedHashes {
-			if partHash == storedHash {
-				partBool = true
-				break
-			}
-		}
-		if !partBool {
-			completionBool = false
-			break
-		}
-	}
-
-	return completionBool, nil
-}
-
-func getDocumentsCount(postId string, ctx context.Context) int {
-	termQuery := elasticsearch.NewTermQuery("postId", postId)
-	result, err := es.Count().Index(config.Elasticsearch.IndexVideo).Query(
-		termQuery).Pretty(true).Do(ctx)
-	if err != nil {
-		result = 0
-	}
-	resultInt := int(result)
-	return resultInt
-}
-
-func getDocumentHashes(postId string, ctx context.Context) []string {
-	var hashes []string
-	termQuery := elasticsearch.NewTermQuery("postId", postId)
-	scroller := es.Scroll().Index(
-		config.Elasticsearch.IndexVideo).Query(termQuery).Size(1)
-	for {
-		res, err := scroller.Do(context.TODO())
-		if err == io.EOF {
-			// No remaining documents matching the search so break out of the 'forever' loop
-			break
-		}
-		for _, hit := range res.Hits.Hits {
-			var part VideoPart
-			json.Unmarshal(hit.Source, &part)
-			hashes = append(hashes, part.Hash)
-		}
-	}
-	return hashes
-}
-
-func getElasticConnection() *elasticsearch.Client {
-	es, err := elasticsearch.NewClient(
-		elasticsearch.SetBasicAuth(config.Elasticsearch.Username,
-			config.Elasticsearch.Password))
-	if err != nil {
-		log.Fatalf("Error creating the client: %s", err)
-	}
-	return es
-}
-
-func createIndex(ctx context.Context, indexName string, mappings string) {
-	exists, err := es.IndexExists(indexName).Do(ctx)
-	if err != nil {
-		log.Println("Error communicating to elastic search, error: ", err)
-	}
-	if !exists {
-		_, err := es.CreateIndex(indexName).BodyString(mappings).Do(ctx)
-		if err != nil {
-			log.Println("Error creating elastic index, error: ", err)
-		}
-	}
-}
-
 // Redis functions
 func getRedisConnection() *redis.Client {
 	redisClient := redis.NewClient(&redis.Options{
@@ -262,12 +47,12 @@ func getRedisConnection() *redis.Client {
 	return redisClient
 }
 
-func GetFromCache(postId string) (string, error) {
+// fetches video metadata from redis cache
+func getVideoMetadata(postId string) (string, error) {
 	val, err := redisClient.Get(postId).Result()
 	if err != nil {
 		log.Println("Issue with redis service")
 	}
-
 	if len(val) == 0 {
 		err = errors.New("empty result from redis")
 	}
@@ -276,9 +61,12 @@ func GetFromCache(postId string) (string, error) {
 
 func PutIntoCache(reqBody []byte) string {
 	var response Response
-	var metaData MetadataVideo
+	var metaData Request
 	json.Unmarshal(reqBody, &metaData)
-	err := redisClient.Set(metaData.ID, string(reqBody), 0).Err()
+	val, err := redisClient.Get(metaData.PostId).Result()
+	if val == "" {
+		err = redisClient.Set(metaData.PostId, string(reqBody), 0).Err()
+	}
 	if err != nil {
 		var resError Errors
 		resError.Side = "server"
@@ -290,7 +78,7 @@ func PutIntoCache(reqBody []byte) string {
 		log.Println("Error while data indexing in redis. err:", err.Error())
 	} else {
 		response.Result = true
-		log.Println("stored video input info, id:", metaData.ID)
+		log.Println("stored video input info, id:", metaData.PostId)
 	}
 	res, _ := json.Marshal(response)
 	return string(res)
@@ -314,7 +102,7 @@ func getMinioConnection() *minio.Client {
 	return minioClient
 }
 
-func UploadFile(buf *bytes.Buffer, imgReq ImageRequest) (string, ImageRequest, error) {
+func UploadFile(buf *bytes.Buffer, imgReq Request) (string, Request, error) {
 	ctx := context.Background()
 	bucketName := config.Minio.ImageBucket
 	contentType := http.DetectContentType(buf.Bytes())
@@ -340,4 +128,191 @@ func UploadFile(buf *bytes.Buffer, imgReq ImageRequest) (string, ImageRequest, e
 	}
 	res, _ := json.Marshal(&response)
 	return string(res), imgReq, err
+}
+
+// function to save a video part in minio and verifies full upload
+// using redis cache
+func SaveVideoData(id string, hash string, part string, buf *bytes.Buffer) string {
+	data := buf.Bytes()
+	videopart := VideoPart{id, part, hash}
+	// data verification
+	err := verifyVideoPart(data, videopart)
+	if err != nil {
+		return generateErrorJson("client", "verification", err)
+	}
+	if !isFileAlreadyUploded(hash, id) {
+		filename, err := putInMinioVideo(buf, id, part)
+		if err != nil {
+			return generateErrorJson("client", "minio", err)
+		}
+		err = markUploadCompletion(id, hash, filename)
+		if err != nil {
+			return generateErrorJson("client", "redis", err)
+		}
+	}
+	completionBool := checkVideoCompleted(id)
+	if completionBool {
+		sendToKafka(id)
+	}
+	return generateSuccessJson(completionBool)
+}
+
+// func to verify uploaded video part is valid, if not valid it returns error
+// checks hash with uploaded video part
+// checks video part hash with metadata which uploaded previously
+func verifyVideoPart(data []byte, videoPart VideoPart) error {
+	// hash verification
+	err := validators.ValidateData(data, videoPart.Hash)
+	if err != nil {
+		log.Println("Hash verification failed", videoPart.Part)
+		return err
+	}
+	err = checkHashExists(videoPart.Hash, videoPart.PostId)
+	return err
+}
+
+// checks hash present or not in metadata
+func checkHashExists(hash string, postId string) error {
+	// fetches metadata from redis
+	meta, err := getVideoMetadata(postId)
+	if err != nil {
+		return err
+	}
+	var metadata Request
+	json.Unmarshal([]byte(meta), &metadata)
+	partBool := false
+	for _, value := range metadata.PartHashes {
+		if value == hash {
+			partBool = true
+			break
+		}
+	}
+	if !partBool {
+		err = errors.New("video broken, reupload")
+		return err
+	}
+	return err
+}
+
+// function to check current uploaded video part is new or already exists
+// throws error if it exists
+func isFileAlreadyUploded(hash string, id string) bool {
+	// fetches metadata from redis
+	meta, err := getVideoMetadata(id)
+	if err != nil {
+		return false
+	}
+	var metadata Request
+	json.Unmarshal([]byte(meta), &metadata)
+
+	uploadBool := false
+	for _, value := range metadata.UploadedHashes {
+		if value == hash {
+			uploadBool = true
+			break
+		}
+	}
+	return uploadBool
+}
+
+// func to store video part in minio
+// returns file name and error if any
+func putInMinioVideo(buf *bytes.Buffer, id string, part string) (string, error) {
+	ctx := context.Background()
+	bucket := config.Minio.VideoBucket
+	contentType := http.DetectContentType(buf.Bytes())
+	objectName := id + "_" + part + "." + strings.Split(contentType, "/")[1]
+
+	// TODO: write logic to avoid duplicates
+	info, err := minioClient.PutObject(ctx, bucket, objectName,
+		buf, int64(buf.Len()), minio.PutObjectOptions{ContentType: contentType})
+	if err == nil {
+		log.Printf("Successfully uploaded %s of size %d\n", objectName, info.Size)
+	}
+	return objectName, err
+}
+
+// this function marks current part of video as completed
+// updates corresponding data in redis
+func markUploadCompletion(id string, hash string, filename string) error {
+	// fetches metadata from redis
+	meta, err := getVideoMetadata(id)
+	if err != nil {
+		return err
+	}
+	var metadata Request
+	json.Unmarshal([]byte(meta), &metadata)
+	metadata.UploadedHashes = append(metadata.UploadedHashes, hash)
+	metadata.FileNames = append(metadata.FileNames, filename)
+	strJson, _ := json.Marshal(metadata)
+	err = redisClient.Set(id, string(strJson), 0).Err()
+	return err
+}
+
+// function to check all parts of video is uploaded to server or not
+func checkVideoCompleted(id string) bool {
+	meta, err := getVideoMetadata(id)
+	if err != nil {
+		return false
+	}
+	var metadata Request
+	json.Unmarshal([]byte(meta), &metadata)
+	if len(metadata.PartHashes) > len(metadata.UploadedHashes) {
+		return false
+	}
+	completionBool := true
+	for _, partHash := range metadata.PartHashes {
+		partBool := false
+		for _, storedHash := range metadata.UploadedHashes {
+			if partHash == storedHash {
+				partBool = true
+				break
+			}
+		}
+		if !partBool {
+			completionBool = false
+			break
+		}
+	}
+	return completionBool
+}
+
+func sendToKafka(id string) error {
+	meta, err := getVideoMetadata(id)
+	if err != nil {
+		return err
+	}
+	var metadata Request
+	json.Unmarshal([]byte(meta), &metadata)
+	metadata.Type = "video"
+	_meta, _ := json.Marshal(metadata)
+	meta = string(_meta)
+	err2 := kafka.ProduceToKafka(meta)
+	if err2 == nil {
+		fmt.Println("sent kafka req, id:", metadata.PostId)
+	}
+	return err2
+}
+
+// helper functions
+
+// generate jsons that contains proper errors faced by server
+func generateErrorJson(side string, tag string, err error) string {
+	var response Response
+	response.Result = false
+	response.Completed = false
+	reserr := Errors{"client", "verification", err.Error()}
+	response.Errors = append(response.Errors, reserr)
+	res, _ := json.Marshal(&response)
+	return string(res)
+}
+
+// generates successfull upload json,
+// completed is True when video or image is fully uploaded
+func generateSuccessJson(completionBool bool) string {
+	var response Response
+	response.Result = true
+	response.Completed = completionBool
+	res, _ := json.Marshal(&response)
+	return string(res)
 }
