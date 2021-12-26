@@ -18,7 +18,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// TODO: mappings for image elastic search
 var config = loadConfig()
 var redisClient = getRedisConnection()
 var minioClient = getMinioConnection()

@@ -31,12 +31,12 @@ func getKafkaConfig() Configuration {
 	if err != nil {
 		log.Fatalln("Unable to decode into struct, ", err)
 	}
-	createKafkaTopics(configuration.Kafka.ProducerTopic)
+	createKafkaTopics(configuration.Kafka.ProducerTopic, configuration)
 	return configuration
 }
 
-func createKafkaTopics(topic string) {
-	conn, err := kafka.Dial("tcp", "localhost:9092")
+func createKafkaTopics(topic string, config Configuration) {
+	conn, err := kafka.Dial("tcp", config.Kafka.Address) 
 	if err != nil {
 		panic(err.Error())
 	}

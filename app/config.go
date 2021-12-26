@@ -1,13 +1,6 @@
 package app
 
 type Config struct {
-	Elasticsearch struct {
-		Username   string `yaml:"username"`
-		Password   string `yaml:"password"`
-		IndexImage string `yaml:"indexImage"`
-		IndexMeta  string `yaml:"indexMeta"`
-		IndexVideo string `yaml:"indexVideo"`
-	} `yaml:"elasticsearch"`
 	Redis struct {
 		Address  string `yaml:"address"`
 		Password string `yaml:"password"`
