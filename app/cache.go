@@ -102,6 +102,7 @@ func getMinioConnection() *minio.Client {
 }
 
 func UploadFile(buf *bytes.Buffer, imgReq Request) (string, Request, error) {
+	minioClient := getMinioConnection()
 	ctx := context.Background()
 	bucketName := config.Minio.ImageBucket
 	contentType := http.DetectContentType(buf.Bytes())
