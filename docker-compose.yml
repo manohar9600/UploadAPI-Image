@@ -1,0 +1,9 @@
+version: "3"
+
+services:
+  uploadapi:
+    build: .
+    ports:
+      - "8002:8002"
+    volumes:
+      - /.configs/uploadapi.yaml:/goapp/config.yaml
