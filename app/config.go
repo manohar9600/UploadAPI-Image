@@ -2,13 +2,11 @@ package app
 
 type Config struct {
 	Redis struct {
-		Address  string `yaml:"address"`
-		Password string `yaml:"password"`
+		Address string `yaml:"address"`
 	} `yaml:"redis"`
 	Minio struct {
 		Address     string `yaml:"address"`
 		AccessKeyID string `yaml:"accessKeyId"`
-		SecretKey   string `yaml:"secretKey"`
 		ImageBucket string `yaml:"imageBucket"`
 		VideoBucket string `yaml:"videoBucket"`
 	} `yaml:"minio"`

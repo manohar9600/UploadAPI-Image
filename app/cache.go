@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"uploadapi/kafka"
 	"uploadapi/validators"
@@ -40,7 +41,7 @@ func loadConfig() Config {
 func getRedisConnection() *redis.Client {
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     config.Redis.Address,
-		Password: config.Redis.Password,
+		Password: os.Getenv("REDIS_PASSWORD"),
 	})
 	log.Println("Connected to redis service")
 	return redisClient
@@ -87,7 +88,7 @@ func PutIntoCache(reqBody []byte) string {
 func getMinioConnection() *minio.Client {
 	endpoint := config.Minio.Address
 	accessKeyID := config.Minio.AccessKeyID
-	secretAccessKey := config.Minio.SecretKey
+	secretAccessKey := os.Getenv("MINIO_SECRET_KEY")
 	// useSSL := true
 
 	// Initialize minio client object.
