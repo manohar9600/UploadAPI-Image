@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: uploadapi-image
+  namespace: upload
+  labels:
+    app: uploadapi-image
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: uploadapi-image
+  template:
+    metadata:
+      labels:
+        app: uploadapi-image
+    spec:
+      containers:
+      - name: uploadapi-image
+        image: localhost:5000/uploadapi-image:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8002
+        volumeMounts:
+        - name: config
+          mountPath: "/goapp"
+          readOnly: true
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: upload-secret
+              key: redis.password
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: upload-secret
+              key: minio.accessKey
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: upload-secret
+              key: minio.secretKey
+      volumes:
+      - name: config
+        configMap:
+          name: upload-config
+          items:
+          - key: "config.yaml"
+            path: "config.yaml"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: uploadapi-image
+  namespace: upload
+spec:
+  ports:
+    - name: http
+      port: 8002
+      targetPort: 8002
+  selector:
+    task: uploadapi-image
