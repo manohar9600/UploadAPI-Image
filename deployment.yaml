@@ -18,7 +18,6 @@ spec:
       containers:
       - name: uploadapi-image
         image: localhost:5000/uploadapi-image:latest
-        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8002
         volumeMounts:
@@ -56,8 +55,8 @@ metadata:
   namespace: upload
 spec:
   ports:
-    - name: http
-      port: 8002
+    - protocol: TCP
+      port: 80
       targetPort: 8002
   selector:
-    task: uploadapi-image
+    app: uploadapi-image

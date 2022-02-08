@@ -8,12 +8,18 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"time"
 	"uploadapi/app"
 	"uploadapi/kafka"
 
 	"github.com/gorilla/mux"
 )
+
+var name = "UploadAPI" // name used for ping test
 
 type KafkaRequest struct {
 	ID string `json:"id"`
@@ -137,9 +143,51 @@ func responseHandlerMetadata(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, response)
 }
 
+func pingHandler(w http.ResponseWriter, req *http.Request) {
+	u, _ := url.Parse(req.URL.String())
+	wait := u.Query().Get("wait")
+	if len(wait) > 0 {
+		duration, err := time.ParseDuration(wait)
+		if err == nil {
+			time.Sleep(duration)
+		}
+	}
+
+	if name != "" {
+		_, _ = fmt.Fprintln(w, "Name:", name)
+	}
+
+	hostname, _ := os.Hostname()
+	_, _ = fmt.Fprintln(w, "Hostname:", hostname)
+
+	ifaces, _ := net.Interfaces()
+	for _, i := range ifaces {
+		addrs, _ := i.Addrs()
+		// handle err
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			_, _ = fmt.Fprintln(w, "IP:", ip)
+		}
+	}
+
+	_, _ = fmt.Fprintln(w, "RemoteAddr:", req.RemoteAddr)
+	if err := req.Write(w); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
 func main() {
 	port := ":8002"
 	router := mux.NewRouter().StrictSlash(true)
+
+	router.HandleFunc("/", pingHandler)
 
 	extension := "/uploadImage"
 	router.HandleFunc(extension, responseHandlerImage)

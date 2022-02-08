@@ -87,7 +87,7 @@ func PutIntoCache(reqBody []byte) string {
 // minio functions
 func getMinioConnection() *minio.Client {
 	endpoint := config.Minio.Address
-	accessKeyID := config.Minio.AccessKeyID
+	accessKeyID := os.Getenv("MINIO_ACCESS_KEY")
 	secretAccessKey := os.Getenv("MINIO_SECRET_KEY")
 	// useSSL := true
 
