@@ -4,9 +4,6 @@ type MetaData struct {
 	ID             string     `json:"_id"`
 	Type           string     `json:"type"`
 	Path           string     `json:"path"`
-	EsPath         []string   `json:"espath"`
-	Length         int        `json:"length"`
-	PiecesCount    int        `json:"piecesCount"`
 	Owner          string     `json:"owner"`
 	Caption        string     `json:"caption"`
 	GeoID          string     `json:"geoId"`
