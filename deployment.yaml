@@ -25,11 +25,6 @@ spec:
           mountPath: "/goapp"
           readOnly: true
         env:
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: upload-secret
-              key: redis.password
         - name: MINIO_ACCESS_KEY
           valueFrom:
             secretKeyRef:

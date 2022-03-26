@@ -66,7 +66,7 @@ func UploadFile(buf *bytes.Buffer, imgReq Request) (string, Request, error) {
 		response.Result = false
 		response.Completed = false
 		response.Errors = append(response.Errors, resError)
-		log.Println("Error while stroring data in minio")
+		log.Println("Error while storing data in minio")
 	} else {
 		log.Printf("Successfully uploaded %s of size %d\n", objectName, info.Size)
 		response.Result = true
